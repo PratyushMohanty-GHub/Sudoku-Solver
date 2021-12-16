@@ -67,6 +67,7 @@ struct timespec get_absoluteTime_1(int given_time)
     spec.tv_nsec = val.tv_usec * 1000 + 1000 * 1000 * (timeInMs % 1000);
     spec.tv_sec += spec.tv_nsec / (1000 * 1000 * 1000);
     spec.tv_nsec %= (1000 * 1000 * 1000);
+    return spec; // CHANGED HERE
 }
 struct timespec get_absoluteTime_2(int given_time)
 {
@@ -82,6 +83,7 @@ struct timespec get_absoluteTime_2(int given_time)
     spec.tv_nsec = val.tv_usec * 1000 + 1000 * 1000 * (timeInMs % 1000);
     spec.tv_sec += spec.tv_nsec / (1000 * 1000 * 1000);
     spec.tv_nsec %= (1000 * 1000 * 1000);
+    return spec; // CHANGED HERE
 }
 int allocate_seat(person_ADT *person)
 {
@@ -101,10 +103,11 @@ int allocate_seat(person_ADT *person)
             printf("t = %ld: %s has got a seat in zone H\n", time(NULL) - simulation_startTime, person->name);
             RESET
         }
+        // If seat allocated in zoneH -> invalid to go to next step(check_if_seat_allocated)
         if (person->seat_receive_time != INVALID)
         {
             pthread_mutex_unlock(&zone_mutex);
-            return INVALID;
+            return INVALID; // INVALID to go to next step
         }
         if (zone_N_capacity > 0)
         {
@@ -209,12 +212,13 @@ int allocate_seat(person_ADT *person)
         return INVALID;
         // exit(1);
     }
-    return VALID;
+    return VALID; // It must go to next step i.e. check_if_seat_allocated
 }
 int check_if_seatAllocated(person_ADT *person)
 {
     if (person->seat_receive_time == INVALID)
     {
+        // If no seat has been allocated
         pthread_mutex_lock(&zone_mutex);
 
         struct timespec abs_time = get_absoluteTime_1(person->patience_time + person->reach_time);
@@ -234,8 +238,28 @@ int check_if_seatAllocated(person_ADT *person)
             if (time_now > person_leave_time)
             {
                 PURPLE
-                printf("%s could not get a seat\n", person->name);
+                printf("t = %ld: %s could not get a seat\n", time(NULL) - simulation_startTime, person->name);
+
                 RESET
+                // CHANGED HERE
+                person->is_at_exit = true;
+
+                pthread_mutex_lock(&group_mutex);
+                groups[person->groupID].no_of_people_at_exit++;
+
+                CYAN
+                    printf("t = %ld: %s is waiting for their friends at the exit\n", time(NULL) - simulation_startTime, person->name);
+                RESET
+
+                if (groups[person->groupID].no_of_people_at_exit == groups[person->groupID].no_of_people)
+                {
+                    GREEN
+                    printf("t = %ld: Group %d is leaving for dinner\n", time(NULL) - simulation_startTime, person->groupID + 1);
+                    RESET
+                }
+                pthread_cond_broadcast(&group_cond);
+                pthread_mutex_unlock(&group_mutex);
+                // CHANGED UPTO HERE
                 return INVALID;
             }
         }
@@ -246,6 +270,7 @@ void leave_dueTo_badPerformance(person_ADT *person)
 {
     if (person->seat_receive_time == INVALID)
     {
+        // If no seat allocated -> leave
         return;
     }
     else
@@ -261,6 +286,12 @@ void leave_dueTo_badPerformance(person_ADT *person)
                 pthread_mutex_lock(&scoreboard_mutex);
                 struct timespec abs_time = get_absoluteTime_2(spectating_time + person->seat_receive_time);
 
+                /*
+                The pthread_cond_timedwait() function allows an application to give up waiting for a particular condition after a given amount of time.
+                The pthread_cond_timedwait() and pthread_cond_wait() functions shall block on a condition variable. 
+                These functions atomically release mutex and cause the calling thread to block on the condition variable cond
+                Upon successful completion, a value of zero shall be returned; otherwise, an error number shall be returned to indicate the error.
+                */
                 if (pthread_cond_timedwait(&scoreboard_cond, &scoreboard_mutex, &abs_time) == 0)
                 {
                     pthread_mutex_unlock(&scoreboard_mutex);
@@ -271,12 +302,12 @@ void leave_dueTo_badPerformance(person_ADT *person)
                     pthread_mutex_unlock(&scoreboard_mutex);
                     break;
                 }
-                pthread_mutex_unlock(&scoreboard_mutex);
+                // pthread_mutex_unlock(&scoreboard_mutex);
             }
             if (person->enrage_value <= num_of_goalsBy_A)
             {
                 person->is_enraged = true;
-                printf("%d - E, %d - A, %d - H\n", person->enrage_value, num_of_goalsBy_A, num_of_goalsBy_H);
+                // printf("%d - E, %d - A, %d - H\n", person->enrage_value, num_of_goalsBy_A, num_of_goalsBy_H);        // CHANGED HERE
                 RED
                     printf("t = %ld: %s is leaving due to the bad defensive performance of his team\n", time(NULL) - simulation_startTime, person->name);
                 RESET
@@ -300,7 +331,7 @@ void leave_dueTo_badPerformance(person_ADT *person)
                     pthread_mutex_unlock(&scoreboard_mutex);
                     break;
                 }
-                pthread_mutex_lock(&scoreboard_mutex);
+                pthread_mutex_unlock(&scoreboard_mutex);
             }
             if (person->enrage_value <= num_of_goalsBy_H)
             {
@@ -329,21 +360,21 @@ void free_seat(person_ADT *person)
     {
         zone_H_capacity++;
         MAGENTA
-        printf("t = %d: %s watched the match for %d seconds and is leaving\n", time_now, person->name, time_now);
+        printf("t = %d: %s watched the match for %d seconds and is leaving\n", time_now, person->name, time_now - person->seat_receive_time);
         RESET
     }
     else if (person->seat_receive_zone == 'A')
     {
         zone_A_capacity++;
         MAGENTA
-        printf("t = %d: %s watched the match for %d seconds and is leaving\n", time_now, person->name, time_now);
+        printf("t = %d: %s watched the match for %d seconds and is leaving\n", time_now, person->name, time_now - person->seat_receive_time);
         RESET
     }
     else if (person->seat_receive_zone == 'N')
     {
         zone_N_capacity++;
         MAGENTA
-        printf("t = %d: %s watched the match for %d seconds and is leaving\n", time_now, person->name, time_now);
+        printf("t = %d: %s watched the match for %d seconds and is leaving\n", time_now, person->name, time_now - person->seat_receive_time);
         RESET
     }
     else
@@ -362,7 +393,7 @@ void free_seat(person_ADT *person)
     groups[person->groupID].no_of_people_at_exit++;
 
     CYAN
-    printf("t = %ld: %s is waiting for their friends at the exit\n", time(NULL) - simulation_startTime, person->name);
+        printf("t = %ld: %s is waiting for their friends at the exit\n", time(NULL) - simulation_startTime, person->name);
     RESET
 
     if (groups[person->groupID].no_of_people_at_exit == groups[person->groupID].no_of_people)
@@ -376,7 +407,6 @@ void free_seat(person_ADT *person)
 }
 void *person_thread_func(void *arg)
 {
-
     person_ADT *person = (person_ADT *)arg;
     int reach_time = person->reach_time;
 
@@ -390,10 +420,11 @@ void *person_thread_func(void *arg)
         // CHANGE
         sleep(1);
         if (allocate_seat(person) == INVALID)
+            // If seat has been already allocated it is not necessary(INVALID) to check for a seat
             break;
 
         // CHANGE
-        sleep(1);
+        // If seat has not been allocated till now: check if seat can be allocated within the time limit
         if (check_if_seatAllocated(person) == VALID)
             continue;
         else
